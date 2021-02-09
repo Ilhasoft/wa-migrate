@@ -1,0 +1,6 @@
+{
+	"BaseURL":    "https://my-%s.com",
+	"Username":   "admin",
+	"DataFile":   "./data.json",
+	"BackupPath": "./backups"
+}
