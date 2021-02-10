@@ -1,4 +1,14 @@
-{
-    "slug", "password",
-    "slug2", "password2",
-}
+[
+    {
+        "url": "https://foo.bar",
+        "filename": "bar.json",
+        "username": "admin",
+        "password": "my_password1"
+    },
+    {
+        "url": "https://foo.bar2",
+        "filename": "bar2.json",
+        "username": "admin",
+        "password": "my_password2"
+    }
+]

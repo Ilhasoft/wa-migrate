@@ -19,10 +19,11 @@ type loginPayload struct {
 	} `json:"users"`
 }
 
-type backupPayload struct {
-	Settings struct {
-		Data string `json:"data"`
-	} `json:"settings"`
+type data struct {
+	URL      string `json:"url"`
+	FileName string `json:"filename"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 func init() {
@@ -37,65 +38,70 @@ func init() {
 
 // /v1/users/login
 func main() {
-	err := os.Mkdir(config.BackupPath, 0755)
-	errAlreadyExists := fmt.Sprintf("mkdir %s: Cannot create a file when that file already exists.", config.BackupPath)
+	err := os.Mkdir("./backups", 0755)
+	errAlreadyExists := "mkdir ./backups: Cannot create a file when that file already exists."
 	if err.Error() != errAlreadyExists {
 		log.Fatal(err)
 	}
 
-	slugs := make(map[string]string)
-	content, err := ioutil.ReadFile(config.DataFile)
+	channelData := []data{}
+	content, err := ioutil.ReadFile("./data.json")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = json.Unmarshal(content, &slugs)
+	err = json.Unmarshal(content, &channelData)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	var wg sync.WaitGroup
-	for k, v := range slugs {
+	for _, c := range channelData {
 		wg.Add(1)
-		go func(k, v string) {
+		go func(c data) {
 			defer wg.Done()
 
-			token, err := getAuthToken(k, v)
+			token, err := getAuthToken(c)
 			if err != nil {
-				log.Errorf("%s %v", k, err)
+				log.Errorf("%s - getting authtoken - %v", c.FileName, err)
 				return
 			}
 
-			err = saveBackup(token, k, v)
+			err = saveBackup(token, c)
 			if err != nil {
-				log.Errorf("%s %v", k, err)
+				log.Errorf("%s - saving backup - %v", c.FileName, err)
 				return
 			}
 
-			log.Infof("%s backup works successfully!", k)
-		}(k, v)
+			log.Infof("%s backup works successfully!", c.FileName)
+		}(c)
 	}
 
 	wg.Wait()
 	log.Info("Finished!")
 }
 
-func getAuthToken(k, v string) (string, error) {
-	loginURL := fmt.Sprintf(config.BaseURL+"%s", k, "/v1/users/login")
+func getAuthToken(c data) (string, error) {
+	loginURL := c.URL + "/v1/users/login"
 	req, err := http.NewRequest("POST", loginURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req.SetBasicAuth(config.Username, v)
+	req.SetBasicAuth(c.Username, c.Password)
 	req.Header.Add("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
 	if res.Status != "200 OK" {
 		return "", errors.New("status: " + res.Status)
 	}
 	bodyText, err := ioutil.ReadAll(res.Body)
-	loginPay := loginPayload{}
-	err = json.Unmarshal(bodyText, &loginPay)
 	if err != nil {
+		return "", err
+	}
+	loginPay := loginPayload{}
+	if err = json.Unmarshal(bodyText, &loginPay); err != nil {
 		return "", err
 	}
 
@@ -106,9 +112,9 @@ func getAuthToken(k, v string) (string, error) {
 	return loginPay.Users[0].Token, nil
 }
 
-func saveBackup(token, k, v string) error {
-	requestBody := strings.NewReader(fmt.Sprintf(`{"password": "%s"}`, v))
-	backupURL := fmt.Sprintf(config.BaseURL+"%s", k, "/v1/settings/backup")
+func saveBackup(token string, c data) error {
+	requestBody := strings.NewReader(fmt.Sprintf(`{"password": "%s"}`, c.Password))
+	backupURL := c.URL + "/v1/settings/backup"
 	req, err := http.NewRequest("POST", backupURL, requestBody)
 	if err != nil {
 		return err
@@ -116,18 +122,18 @@ func saveBackup(token, k, v string) error {
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 	req.Header.Add("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
 	if res.Status != "200 OK" {
 		return errors.New("status: " + res.Status)
 	}
 	bodyText, err := ioutil.ReadAll(res.Body)
-	backupPay := backupPayload{}
-	err = json.Unmarshal(bodyText, &backupPay)
 	if err != nil {
 		return err
 	}
 
-	err = ioutil.WriteFile(fmt.Sprintf(config.BackupPath+"/%s", k), []byte(fmt.Sprint(backupPay.Settings.Data)), 0644)
-	if err != nil {
+	if err := ioutil.WriteFile(fmt.Sprintf("./backups/%s", c.FileName), bodyText, 0644); err != nil {
 		return err
 	}
 

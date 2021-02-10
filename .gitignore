@@ -15,6 +15,5 @@
 # vendor/
 
 # Others
-config.json
 data.json
 backups
