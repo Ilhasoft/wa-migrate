@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -36,8 +37,19 @@ func init() {
 	})
 }
 
+var (
+	restore = flag.Bool("restore", false, "if true will restore the data")
+	backup  = flag.Bool("backup", false, "if true will restore the data")
+)
+
 // /v1/users/login
 func main() {
+	flag.Parse()
+
+	if !*backup && !*restore {
+		log.Fatal("Use the flag -backup and/or -restore")
+	}
+
 	err := os.Mkdir("./backups", 0755)
 	errAlreadyExists := "mkdir ./backups: Cannot create a file when that file already exists."
 	if err.Error() != errAlreadyExists {
@@ -60,6 +72,7 @@ func main() {
 		wg.Add(1)
 		go func(c data) {
 			defer wg.Done()
+			res := []string{c.URL}
 
 			token, err := getAuthToken(c)
 			if err != nil {
@@ -67,13 +80,23 @@ func main() {
 				return
 			}
 
-			err = saveBackup(token, c)
-			if err != nil {
-				log.Errorf("%s - saving backup - %v", c.FileName, err)
-				return
+			if *backup {
+				err = saveBackup(token, c)
+				if err != nil {
+					log.Errorf("%s - saving backup - %v", c.FileName, err)
+					return
+				}
+
+				res = append(res, fmt.Sprintf("%s backup works successfully!", c.FileName))
 			}
 
-			log.Infof("%s backup works successfully!", c.FileName)
+			if *restore {
+				restoreData(token, c)
+
+				res = append(res, fmt.Sprintf("%s restore works successfully!", c.FileName))
+			}
+
+			log.Info(strings.Join(res, "\n"))
 		}(c)
 	}
 
@@ -135,6 +158,42 @@ func saveBackup(token string, c data) error {
 
 	if err := ioutil.WriteFile(fmt.Sprintf("./backups/%s", c.FileName), bodyText, 0644); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func restoreData(token string, c data) error {
+	// /v1/settings/restore
+	file, err := ioutil.ReadFile(fmt.Sprintf("./backups/%s", c.FileName))
+	if err != nil {
+		return err
+	}
+
+	restoreData := struct {
+		Settings struct {
+			Data string `json:"data"`
+		} `json:"settings"`
+	}{}
+
+	if err := json.Unmarshal(file, &restoreData); err != nil {
+		return err
+	}
+
+	requestBody := strings.NewReader(fmt.Sprintf(`{"password": "%s", "data": "%s"}`, c.Password, restoreData.Settings.Data))
+	restoreURL := c.URL + "/v1/settings/restore"
+	req, err := http.NewRequest("POST", restoreURL, requestBody)
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Add("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	if res.Status != "200 OK" {
+		return errors.New("status: " + res.Status)
 	}
 
 	return nil
